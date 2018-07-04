@@ -16,17 +16,6 @@ from skimage import io
 
 from matplotlib import pyplot as plt 
 
-def subtract_median( im , median ) :
-	#median filter
-	im_spots = np.zeros( shape = im.shape , dtype = im.dtype )
-	for i in range( im.shape[ 0 ] ) :
-
-		im_spots[ i , : , : ] = img_as_uint( 
-				img_as_float( im[ i , : , : ] ) - img_as_float( median[ i , : , : ] )
-				)
-
-	return im_spots 
-
 def MAD( x , axis = None , k = 1.4826):
 
 	MAD = np.median( np.absolute( x - np.median( x , axis ) ) , axis )
@@ -86,8 +75,15 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 
 	# Compute the median filter of the image, which will be used to select the spots
 	im_median = cp.deepcopy( im )
+	projection = np.zeros( ( im.shape[ 1 ] , im.shape[ 2 ] ) , im.dtype )
 	for i in range( im.shape[ 0 ] ) :
 		im_median[ i , : , : ] = filters.median( im[ i , : , : ] , morphology.disk( median_radius ) )
+#		projection = projection + im[ i , : , : ]
+#	
+#	dr = np.max( im_median ) - np.min( im ) + np.min( projection) 
+#	projection[ projection > dr ] = dr
+#
+#	tiff.imsave( 'projection.tif' , projection )
 
 	# Make a threshold image, that will be used to output the pixel values
 	threshold_raw_cells = filters.threshold_otsu( im )
@@ -105,21 +101,29 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 	threshold_image[ : ] = 0
 	threshold_image[ ( threshold_median_image == 1 ) & ( threshold_raw_image == 1 ) ] = 1
 
-	# Isolate pixels brighter than the median. These will be spots
-	im_spots = cp.deepcopy( im )
-	im_spots[ im <= im_median ] = 0
-
-	# Remove the median value from the isolated spots as a 
-	# measure of the local cytoplasmatic background. This 
-	# image of the spots will be used to theshorld the spots.
-	im_spots[ im_spots == im ] = im_spots[ im_spots == im ] - im_median[ im_spots == im ]
-
-
 	# Exclude the spots that have been thresholded
 	if exclude_spots :
 
+		# Isolate pixels brighter than the median. These will be spots
+		im_spots = cp.deepcopy( im )
+		im_spots[ im <= im_median ] = 0
+	
+		# Remove the median value from the isolated spots as a 
+		# measure of the local cytoplasmatic background. This 
+		# image of the spots will be used to theshorld the spots.
+		im_spots[ im_spots == im ] = im_spots[ im_spots == im ] - im_median[ im_spots == im ]
+
+
 		threshold_spots = filters.threshold_yen( im_spots )
-		threshold_image[ im_spots >= threshold_spots ] = 0
+		
+		im_spots[ im_spots < threshold_spots ] = 0
+		im_spots[ im_spots >= threshold_spots ] = 1
+		
+		for i in range( im_spots.shape[ 0 ] ) :
+			
+			im_spots[ i , : , : ] = morphology.dilation( im_spots[ i , : , : ] )
+
+		threshold_image[ im_spots == 1 ] = 0
 
 	# Compute the red (reference) channel thresholding
 	if ref_threshold == [] :
@@ -128,7 +132,7 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 		# that are autofluorescent in the red channel
 	
 		for i in range( threshold_image.shape[ 0 ] ) :
-			lb = label( threshold_image[ i , : , : ] )
+		lb = label( threshold_image[ i , : , : ] )
 			for j in range( np.max( lb ) ) :
 				threshold_area = len( lb[ lb == j + 1 ] )
 				if np.log( threshold_area ) < 8 :
