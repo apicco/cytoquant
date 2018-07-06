@@ -31,7 +31,6 @@ def load_images( path , reference_frame = 0 , target_frame = 1 , fv_shape = ( 10
 	into account the fluorescence measurements throughout the length of the acquisition.
 
 	- fv_shape: is a tuple with the size of the field of view, in pixels. Default is ( 1024 , 1344 )
-
 	"""
 
 
@@ -75,7 +74,7 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 
 	# Compute the median filter of the image, which will be used to select the spots
 	im_median = cp.deepcopy( im )
-	projection = np.zeros( ( im.shape[ 1 ] , im.shape[ 2 ] ) , im.dtype )
+#	projection = np.zeros( ( im.shape[ 1 ] , im.shape[ 2 ] ) , im.dtype )
 	for i in range( im.shape[ 0 ] ) :
 		im_median[ i , : , : ] = filters.median( im[ i , : , : ] , morphology.disk( median_radius ) )
 #		projection = projection + im[ i , : , : ]
@@ -113,15 +112,13 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 		# image of the spots will be used to theshorld the spots.
 		im_spots[ im_spots == im ] = im_spots[ im_spots == im ] - im_median[ im_spots == im ]
 
-
 		threshold_spots = filters.threshold_yen( im_spots )
 		
 		im_spots[ im_spots < threshold_spots ] = 0
 		im_spots[ im_spots >= threshold_spots ] = 1
-		
+
 		for i in range( im_spots.shape[ 0 ] ) :
-			
-			im_spots[ i , : , : ] = morphology.dilation( im_spots[ i , : , : ] )
+			im_spots[ i , : , : ] = morphology.dilation( im_spots[ i , : , : ] , selem = morphology.disk( 3 ) )
 
 		threshold_image[ im_spots == 1 ] = 0
 
@@ -132,7 +129,7 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 		# that are autofluorescent in the red channel
 	
 		for i in range( threshold_image.shape[ 0 ] ) :
-		lb = label( threshold_image[ i , : , : ] )
+			lb = label( threshold_image[ i , : , : ] )
 			for j in range( np.max( lb ) ) :
 				threshold_area = len( lb[ lb == j + 1 ] )
 				if np.log( threshold_area ) < 8 :
@@ -172,7 +169,6 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 	"""
 
 	# list images
-	
 	channels = load_images( path )
 
 	reference_threshold = select_cytoplasm( channels[ 0 ] , median_radius , exclude_spots , threshold_image_name = 'reference_threshold.tif' )
@@ -182,23 +178,27 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 
 		print( "golog = True; I'm working in the log space of the flurescence intensities" )
 
+		background_values = np.log( channels[ 1 ][ ( target_threshold == 0 ) & ( reference_threshold == 0 ) ] ) / np.log( 2 ) 
+
 		reference_values = np.log( channels[ 1 ][ reference_threshold == 1 ] ) / np.log( 2 ) 
 		target_values = np.log( channels[ 1 ][ target_threshold == 1 ] ) / np.log( 2 ) 
 
 		output = [
-				2 ** ( np.median( target_values ) -  np.median( reference_values ) ) ,
+				( 2 ** np.median( target_values ) -  2 ** np.median( background_values ) ) / ( 2 ** np.median( reference_values ) -  2 ** np.median( background_values ) ) ,
 				1 ]
 	else :
 
 		reference_values = channels[ 1 ][ reference_threshold == 1 ]
 		target_values = channels[ 1 ][ target_threshold == 1 ]
+		background_values = channels[ 1 ][ ( target_threshold == 0 ) & ( reference_threshold == 0 ) ]
 
 		output = [
-				np.median( target_values ) / np.median( reference_values ) ,
+				( np.median( target_values ) - np.median( background_values ) ) / ( np.median( reference_values ) - np.median( background_values ) ) ,
 				1 ]
 	plt.figure()
-	plt.hist( reference_values , facecolor = 'g', alpha = 0.75 )
-	plt.hist( target_values , facecolor = 'r' , alpha = 0.75 )
+	plt.hist( reference_values , normed = True , facecolor = 'g', alpha = 0.75 )
+	plt.hist( target_values , normed = True , facecolor = 'r' , alpha = 0.75 )
+	plt.hist( background_values , normed = True , facecolor = 'b' , alpha = 0.75 , bins = 70 )
 	plt.title( 'ratio = ' + str( output[ 0 ] ) )
 	plt.savefig( plot_name + '.png' )
 
