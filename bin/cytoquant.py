@@ -74,15 +74,8 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 
 	# Compute the median filter of the image, which will be used to select the spots
 	im_median = cp.deepcopy( im )
-#	projection = np.zeros( ( im.shape[ 1 ] , im.shape[ 2 ] ) , im.dtype )
 	for i in range( im.shape[ 0 ] ) :
 		im_median[ i , : , : ] = filters.median( im[ i , : , : ] , morphology.disk( median_radius ) )
-#		projection = projection + im[ i , : , : ]
-#	
-#	dr = np.max( im_median ) - np.min( im ) + np.min( projection) 
-#	projection[ projection > dr ] = dr
-#
-#	tiff.imsave( 'projection.tif' , projection )
 
 	# Make a threshold image, that will be used to output the pixel values
 	threshold_raw_cells = filters.threshold_otsu( im )
@@ -116,7 +109,8 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 		
 		im_spots[ im_spots < threshold_spots ] = 0
 		im_spots[ im_spots >= threshold_spots ] = 1
-
+		
+		#spolt dilation to limit the influence of the pixel intensity in the spots
 		for i in range( im_spots.shape[ 0 ] ) :
 			im_spots[ i , : , : ] = morphology.dilation( im_spots[ i , : , : ] , selem = morphology.disk( 3 ) )
 
@@ -145,8 +139,17 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 				if np.max( ref_threshold[ i , : , : ][ lb == ( j + 1 ) ] ) > 0 :
 					threshold_image[ i , : , : ][ lb == ( j + 1 ) ] = 0 
 
+
+	# erode the threshold_image. The threshold image selects the pixels 
+	# for the quantification. The erosion is a conservative measure to 
+	# reduce the likelihood of quantifying pixels that are outside the 
+	# cell.
+	for i in range( threshold_image.shape[ 0 ] ) :
+		threshold_image[ i , : , : ] = morphology.erosion( threshold_image[ i , : , : ] , selem = morphology.disk( 3 ) )
+
 	tiff.imsave( threshold_image_name , threshold_image )
 	tiff.imsave( 'raw_channel.tif' , im )
+	
 	return  threshold_image
 
 def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , plot_name = 'hist' ):
