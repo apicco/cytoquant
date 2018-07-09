@@ -77,7 +77,9 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 	for i in range( im.shape[ 0 ] ) :
 		im_median[ i , : , : ] = filters.median( im[ i , : , : ] , morphology.disk( median_radius ) )
 
-	# Make a threshold image, that will be used to output the pixel values
+	# Make a threshold image, that will be used to output the pixel values.
+	# The threshold image is the combination of the thresholds on the raw 
+	# and median filtered image.
 	threshold_raw_cells = filters.threshold_otsu( im )
 	threshold_median_cells = filters.threshold_otsu( im_median )
 
@@ -181,27 +183,36 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 
 		print( "golog = True; I'm working in the log space of the flurescence intensities" )
 
-		background_values = np.log( channels[ 1 ][ ( target_threshold == 0 ) & ( reference_threshold == 0 ) ] ) / np.log( 2 ) 
-
 		reference_values = np.log( channels[ 1 ][ reference_threshold == 1 ] ) / np.log( 2 ) 
 		target_values = np.log( channels[ 1 ][ target_threshold == 1 ] ) / np.log( 2 ) 
 
+		r = np.median( reference_values )
+		s_r = MAD( reference_values )
+		t = np.median( target_values ) 
+		s_t = MAD( target_values )
+
 		output = [
-				( 2 ** np.median( target_values ) -  2 ** np.median( background_values ) ) / ( 2 ** np.median( reference_values ) -  2 ** np.median( background_values ) ) ,
-				1 ]
+				2 ** t - 2 ** r ,
+				np.sqrt( ( s_t * np.log( 2 ) *  2 ** t ) ** 2 + ( s_r * np.log( 2 ) * 2 ** r ) ** 2 ) 
+				]
 	else :
 
 		reference_values = channels[ 1 ][ reference_threshold == 1 ]
 		target_values = channels[ 1 ][ target_threshold == 1 ]
-		background_values = channels[ 1 ][ ( target_threshold == 0 ) & ( reference_threshold == 0 ) ]
 
+		t = np.median( target_values ) 
+		s_t = MAD( target_values )
+		r = np.median( reference_values )
+		s_r = MAD( reference_values )
+		
 		output = [
-				( np.median( target_values ) - np.median( background_values ) ) / ( np.median( reference_values ) - np.median( background_values ) ) ,
-				1 ]
+				t - r  ,
+				np.sqrt( s_t ** 2 + s_r ** 2 ) 
+				]
+
 	plt.figure()
 	plt.hist( reference_values , normed = True , facecolor = 'g', alpha = 0.75 )
 	plt.hist( target_values , normed = True , facecolor = 'r' , alpha = 0.75 )
-	plt.hist( background_values , normed = True , facecolor = 'b' , alpha = 0.75 , bins = 70 )
 	plt.title( 'ratio = ' + str( output[ 0 ] ) )
 	plt.savefig( plot_name + '.png' )
 
