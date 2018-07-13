@@ -118,18 +118,42 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 
 		threshold_image[ im_spots == 1 ] = 0
 
+
+	# erode the threshold_image. The threshold image selects the pixels 
+	# for the quantification. The erosion is a conservative measure to 
+	# reduce the likelihood of quantifying pixels that are outside the 
+	# cell.
+	for i in range( threshold_image.shape[ 0 ] ) :
+		threshold_image[ i , : , : ] = morphology.erosion( threshold_image[ i , : , : ] , selem = morphology.disk( 3 ) )
+
+	ID = 1 #ID of thresholded cells cannot start at 0, as that' the background.
+	
 	# Compute the red (reference) channel thresholding
 	if ref_threshold == [] :
 
 		# Remove the thresholded areas that are smaller than E^8. Those are the vacuols 
 		# that are autofluorescent in the red channel
-	
+
 		for i in range( threshold_image.shape[ 0 ] ) :
+			
 			lb = label( threshold_image[ i , : , : ] )
+		
 			for j in range( np.max( lb ) ) :
+
 				threshold_area = len( lb[ lb == j + 1 ] )
+				
+				# set the area threshold limit to be exp( 8 ). If cells
+				# are smaller they are likely errors in the thresholding
+				# and they are removed. If they are bigger, they are kept
+				# and they are assigned an id.
 				if np.log( threshold_area ) < 8 :
+
 					threshold_image[ i , : , : ][ lb == ( j + 1 ) ] = 0
+
+				else :
+
+					threshold_image[ i ,  : , : ][ lb == ( j + 1 ) ] = ID
+					ID = ID + 1
 
 	# Compute the green (target) channel thresholding
 	else :
@@ -138,16 +162,19 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 		for i in range( threshold_image.shape[ 0 ] ) :
 			lb = label( threshold_image[ i , : , : ] )
 			for j in range( np.max( lb ) ) :
+				
+				# If cells are not falling into the reference threshold 
+				# areas they are likely errors in the thresholding
+				# and they are removed. If they are bigger, they are kept
+				# and they are assigned an id.
 				if np.max( ref_threshold[ i , : , : ][ lb == ( j + 1 ) ] ) > 0 :
+
 					threshold_image[ i , : , : ][ lb == ( j + 1 ) ] = 0 
 
+				else :
 
-	# erode the threshold_image. The threshold image selects the pixels 
-	# for the quantification. The erosion is a conservative measure to 
-	# reduce the likelihood of quantifying pixels that are outside the 
-	# cell.
-	for i in range( threshold_image.shape[ 0 ] ) :
-		threshold_image[ i , : , : ] = morphology.erosion( threshold_image[ i , : , : ] , selem = morphology.disk( 3 ) )
+					threshold_image[ i ,  : , : ][ lb == ( j + 1 ) ] = ID
+					ID = ID + 1
 
 	tiff.imsave( threshold_image_name , threshold_image )
 	tiff.imsave( 'raw_channel.tif' , im )
@@ -179,17 +206,37 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 	reference_threshold = select_cytoplasm( channels[ 0 ] , median_radius , exclude_spots , threshold_image_name = 'reference_threshold.tif' )
 	target_threshold = select_cytoplasm( channels[ 1 ] , median_radius , exclude_spots , ref_threshold = reference_threshold , threshold_image_name = 'target_threshold.tif' )
 
+	print( 'thresholds done' )
 	if golog : 
 
 		print( "golog = True; I'm working in the log space of the flurescence intensities" )
 
-		reference_values = np.log( channels[ 1 ][ reference_threshold == 1 ] ) / np.log( 2 ) 
-		target_values = np.log( channels[ 1 ][ target_threshold == 1 ] ) / np.log( 2 ) 
+		reference_values = []
+		for i in range( 1 , np.max( reference_threshold ) + 1 ) :
+
+			# cell masks can have small pixel regions, usually at the edge of the cell (hence with low intensity)
+			# that are left alone and are labelled as one thresholded object. These are not cells and need to be
+			# discarded. I use the same criteria as to identify vacuels. Any object larger thant exp( 8 ) pixels
+			# is considered a cell and it is eligible of analysis
+			if np.log( len( reference_threshold[ reference_threshold == i ] ) ) > 8 :
+				reference_values.append( np.median( np.log( channels[ 1 ][ reference_threshold == i ] ) / np.log( 2 ) ) )
+		reference_all_values = np.log( channels[ 1 ][ reference_threshold > 0 ] ) / np.log( 2 ) 
+
+		target_values = []
+		for i in range( 1 , np.max( target_threshold ) + 1 ) :
+
+			# cell masks can have small pixel regions, usually at the edge of the cell (hence with low intensity)
+			# that are left alone and are labelled as one thresholded object. These are not cells and need to be
+			# discarded. I use the same criteria as to identify vacuels. Any object larger thant exp( 8 ) pixels
+			# is considered a cell and it is eligible of analysis
+			if np.log( len( target_threshold[ target_threshold == i ] ) ) > 8 :
+				target_values.append( np.median( np.log( channels[ 1 ][ target_threshold == i ] ) / np.log( 2 ) ) )
+		target_all_values = np.log( channels[ 1 ][ target_threshold > 0 ] ) / np.log( 2 ) 
 
 		r = np.median( reference_values )
-		s_r = MAD( reference_values )
+		s_r = MAD( reference_values ) / np.sqrt( len( reference_values ) )
 		t = np.median( target_values ) 
-		s_t = MAD( target_values )
+		s_t = MAD( target_values ) / np.sqrt( len( target_values ) )
 
 		output = [
 				2 ** t - 2 ** r ,
@@ -197,13 +244,35 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 				]
 	else :
 
-		reference_values = channels[ 1 ][ reference_threshold == 1 ]
-		target_values = channels[ 1 ][ target_threshold == 1 ]
+		reference_values = []
+		
+		for i in range( 1 , np.max( reference_threshold ) + 1 ) :
+			
+			# cell masks can have small pixel regions, usually at the edge of the cell (hence with low intensity)
+			# that are left alone and are labelled as one thresholded object. These are not cells and need to be
+			# discarded. I use the same criteria as to identify vacuels. Any object larger thant exp( 8 ) pixels
+			# is considered a cell and it is eligible of analysis
+			if np.log( len( reference_threshold[ reference_threshold == i ] ) ) > 8 :
+				reference_values.append( np.median( channels[ 1 ][ reference_threshold == i ] ) )
+		reference_all_values = channels[ 1 ][ refrence_threshold > 0 ]
+		
+		target_values = []
+		
+		for i in range( 1 , np.max( target_threshold ) + 1 ) :
+			
+			# cell masks can have small pixel regions, usually at the edge of the cell (hence with low intensity)
+			# that are left alone and are labelled as one thresholded object. These are not cells and need to be
+			# discarded. I use the same criteria as to identify vacuels. Any object larger thant exp( 8 ) pixels
+			# is considered a cell and it is eligible of analysis
+			if np.log( len( target_threshold[ target_threshold == i ] ) ) > 8 :
+				target_values.append( np.median( channels[ 1 ][ target_threshold == i ] ) )
+		target_all_values = channels[ 1 ][ target_threshold > 0 ]
+	
 
 		t = np.median( target_values ) 
-		s_t = MAD( target_values )
+		s_t = MAD( target_values ) / np.sqrt( len( target_values ) )
 		r = np.median( reference_values )
-		s_r = MAD( reference_values )
+		s_r = MAD( reference_values ) / np.sqrt( len( reference_values ) )
 		
 		output = [
 				t - r  ,
@@ -211,12 +280,15 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 				]
 
 	plt.figure()
-	plt.hist( reference_values , normed = True , facecolor = 'g', alpha = 0.75 )
-	plt.hist( target_values , normed = True , facecolor = 'r' , alpha = 0.75 )
+	plt.hist( reference_all_values , normed = True , facecolor = 'g', alpha = 0.75 , label = 'cell autoFI' )
+	#plt.hist( reference_values , normed = True , facecolor = 'b', alpha = 0.75 , label = 'cell autoFI' )
+	plt.hist( target_all_values , normed = True , facecolor = 'r' , alpha = 0.75 , label = 'target prot. FI' )
+	#plt.hist( target_values , normed = True , facecolor = 'k' , alpha = 0.75 , label = 'target prot. FI' )
+	plt.xlabel( 'log( FI )' )
 	plt.title( 'ratio = ' + str( output[ 0 ] ) )
+	plt.legend( loc = 'best' )
 	plt.savefig( plot_name + '.png' )
 
 	return reference_values , target_values , output
-
 
 
