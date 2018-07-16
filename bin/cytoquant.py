@@ -181,7 +181,7 @@ def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] ,
 	
 	return  threshold_image
 
-def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , plot_name = 'hist' ):
+def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , plot_name = 'hist' , reference_threshold_mask = 'reference_threshold_mask.tif' , target_threshold_mask = 'target_threshold_mask.tif' ):
 
 	"""
 	cytoquant( path , median_radius = 17 , exclude_spots = True , golog = True ) : extract the pixel values
@@ -203,8 +203,8 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 	# list images
 	channels = load_images( path )
 
-	reference_threshold = select_cytoplasm( channels[ 0 ] , median_radius , exclude_spots , threshold_image_name = 'reference_threshold.tif' )
-	target_threshold = select_cytoplasm( channels[ 1 ] , median_radius , exclude_spots , ref_threshold = reference_threshold , threshold_image_name = 'target_threshold.tif' )
+	reference_threshold = select_cytoplasm( channels[ 0 ] , median_radius , exclude_spots , threshold_image_name = refrence_threshold_mask )
+	target_threshold = select_cytoplasm( channels[ 1 ] , median_radius , exclude_spots , ref_threshold = reference_threshold , threshold_image_name = target_threshold_mask )
 
 	print( 'thresholds done' )
 	if golog : 
