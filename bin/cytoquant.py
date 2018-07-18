@@ -11,6 +11,7 @@ from skimage import filters #import filters
 from skimage import morphology
 from skimage import img_as_float, img_as_uint
 from skimage.external import tifffile as tiff
+from skimage.exposure import rescale_intensity
 from skimage.measure import label
 from skimage import io
 
@@ -45,6 +46,7 @@ def load_images( path , reference_frame = 0 , target_frame = 1 , fv_shape = ( 10
 	for i in range( len( images ) ):
 
 		im = tiff.imread( path + '/' + images[ i ] )
+		#im = rescale_intensity( im , in_range = ( 0 , 2**12 - 1 ) , out_range = 'uint16' ) #DEBUG
 
 		if ( im.shape[ 1 ] < fv_shape[ 0 ] ) | ( im.shape[ 2 ] < fv_shape[ 1 ] ) : 
 
@@ -70,116 +72,103 @@ def load_images( path , reference_frame = 0 , target_frame = 1 , fv_shape = ( 10
 
 	return ( reference_channel , target_channel )
 
-def select_cytoplasm( im , median_radius , exclude_spots ,  ref_threshold = [] , threshold_image_name = 'threshold.tif') : 
+def threshold_cytoplasm( im , median_radius , exclude_spots ) : 
 
-	# Compute the median filter of the image, which will be used to select the spots
-	im_median = cp.deepcopy( im )
-	for i in range( im.shape[ 0 ] ) :
-		im_median[ i , : , : ] = filters.median( im[ i , : , : ] , morphology.disk( median_radius ) )
-
-	# Make a threshold image, that will be used to output the pixel values.
-	# The threshold image is the combination of the thresholds on the raw 
-	# and median filtered image.
-	threshold_raw_cells = filters.threshold_otsu( im )
-	threshold_median_cells = filters.threshold_otsu( im_median )
-
-	threshold_raw_image = cp.deepcopy( im )
-	threshold_raw_image[ im <= threshold_raw_cells ] = 0
-	threshold_raw_image[ im > threshold_raw_cells ] = 1
-
-	threshold_median_image = cp.deepcopy( im )
-	threshold_median_image[ im <= threshold_median_cells ] = 0
-	threshold_median_image[ im > threshold_median_cells ] = 1
-
+	im_spots = cp.deepcopy( im )
 	threshold_image = cp.deepcopy( im )
 	threshold_image[ : ] = 0
-	threshold_image[ ( threshold_median_image == 1 ) & ( threshold_raw_image == 1 ) ] = 1
 
-	# Exclude the spots that have been thresholded
-	if exclude_spots :
+	for i in range( im.shape[ 0 ] ) : #filter images individually
 
-		# Isolate pixels brighter than the median. These will be spots
-		im_spots = cp.deepcopy( im )
-		im_spots[ im <= im_median ] = 0
+		im_frame = im[ i , : , : ]
+		threshold_image_frame = threshold_image[ i , : , : ]
+		# Compute the median filter of the image, which will be used to select the spots
+		im_median = filters.median( im_frame , morphology.disk( median_radius ) )
+
+		# Make a threshold image, that will be used to output the pixel values.
+		# The threshold image is the combination of the thresholds on the raw 
+		# and median filtered image.
+		threshold_raw = filters.threshold_otsu( im_frame )
+		threshold_median = filters.threshold_otsu( im_median )
 	
-		# Remove the median value from the isolated spots as a 
-		# measure of the local cytoplasmatic background. This 
-		# image of the spots will be used to theshorld the spots.
-		im_spots[ im_spots == im ] = im_spots[ im_spots == im ] - im_median[ im_spots == im ]
+		threshold_image_frame[ ( im_frame > threshold_median ) & ( im_frame > threshold_raw ) ] = 1
+	
+		# Exclude the spots that have been thresholded
+		if exclude_spots :
 
-		threshold_spots = filters.threshold_yen( im_spots )
+			im_spots_tmp = im_spots[ i , : , : ]
+
+			# Isolate pixels brighter than the median. These will be spots
+			im_spots_tmp[ im_frame <= im_median ] = 0
 		
-		im_spots[ im_spots < threshold_spots ] = 0
-		im_spots[ im_spots >= threshold_spots ] = 1
-		
-		#spolt dilation to limit the influence of the pixel intensity in the spots
-		for i in range( im_spots.shape[ 0 ] ) :
-			im_spots[ i , : , : ] = morphology.dilation( im_spots[ i , : , : ] , selem = morphology.disk( 3 ) )
+			# Remove the median value from the isolated spots as a 
+			# measure of the local cytoplasmatic background. This 
+			# image of the spots will be used to theshorld the spots.
+			im_spots_tmp[ im_spots_tmp == im_frame ] = im_spots_tmp[ im_spots_tmp == im_frame ] - im_median[ im_spots_tmp == im_frame ]
+	
+			threshold_spots = filters.threshold_yen( im_spots_tmp )
+			
+			im_spots_tmp[ im_spots_tmp < threshold_spots ] = 0
+			im_spots_tmp[ im_spots_tmp >= threshold_spots ] = 1
+			
+			#spot dilation to limit the influence of the pixel intensity in the spots
+			im_spots_tmp = morphology.dilation( im_spots_tmp , selem = morphology.disk( 3 ) )
 
-		threshold_image[ im_spots == 1 ] = 0
+#DEBUG		if ( ref_threshold == [] ) & ( i == 2 ) :
+#DEBUG			tiff.imsave( 'tmp-mask.tif' , threshold_image_frame )
+#DEBUG			tiff.imsave( 'tmp-raw.tif' , im_frame )
+#DEBUG			tiff.imsave( 'tmp.tif' , im_median )
+	
+	#remove all the spots from the thresholded image
+	threshold_image[ im_spots == 1 ] = 0
 
+	return threshold_image
 
-	# erode the threshold_image. The threshold image selects the pixels 
-	# for the quantification. The erosion is a conservative measure to 
-	# reduce the likelihood of quantifying pixels that are outside the 
-	# cell.
-	for i in range( threshold_image.shape[ 0 ] ) :
-		threshold_image[ i , : , : ] = morphology.erosion( threshold_image[ i , : , : ] , selem = morphology.disk( 3 ) )
+def select_cytoplasm( t , r , threshold_image_name = 'threshold.tif') : 
 
 	ID = 1 #ID of thresholded cells cannot start at 0, as that' the background.
 	
-	# Compute the red (reference) channel thresholding
-	if ref_threshold == [] :
+	for i in range( t.shape[ 0 ] ) :
 
-		# Remove the thresholded areas that are smaller than E^8. Those are the vacuols 
-		# that are autofluorescent in the red channel
+		t_frame = t[ i , : , : ] 
+		r_frame = r[ i , : , : ] 
 
-		for i in range( threshold_image.shape[ 0 ] ) :
-			
-			lb = label( threshold_image[ i , : , : ] )
+		#TO DO add one round of erosion over a copy of t_frame, to remove dust and sspeed up the thresholding
+		lb = label( t_frame )
 		
-			for j in range( np.max( lb ) ) :
+		for j in range( np.max( lb ) ) :
+			
+			print( j )
+			
+			t_area = len( lb[ lb == j + 1 ] )
 
-				threshold_area = len( lb[ lb == j + 1 ] )
-				
-				# set the area threshold limit to be exp( 8 ). If cells
-				# are smaller they are likely errors in the thresholding
-				# and they are removed. If they are bigger, they are kept
-				# and they are assigned an id.
-				if np.log( threshold_area ) < 8 :
+			# set the area threshold limit to be exp( 8 ). If cells
+			# are smaller they are likely errors in the thresholding
+			# and they are removed. If they are bigger, they are kept
+			# and they are assigned an id, but only if the reference (r)
+			# and target (t) images do not overlap.
+			if np.log( t_area ) < 8 :
 
-					threshold_image[ i , : , : ][ lb == ( j + 1 ) ] = 0
+				t_frame[ lb == ( j + 1 ) ] = 0
 
-				else :
+			elif np.max( r_frame[ lb == ( j + 1 ) ] ) > 0 :
+					
+				t_frame[ lb == ( j + 1 ) ] = 0 
 
-					threshold_image[ i ,  : , : ][ lb == ( j + 1 ) ] = ID
-					ID = ID + 1
+			else : 
 
-	# Compute the green (target) channel thresholding
-	else :
+				t_frame[ lb == ( j + 1 ) ] = ID
+				ID = ID + 1
+		
+		# erode the threshold_image. The threshold image selects the pixels 
+		# for the quantification. The erosion is a conservative measure to 
+		# reduce the likelihood of quantifying pixels that are outside the 
+		# cell.
+		t_frame = morphology.erosion( t_frame , selem = morphology.disk( 3 ) )
 
-		# Remove the thresholded cells that belong to the reference	
-		for i in range( threshold_image.shape[ 0 ] ) :
-			lb = label( threshold_image[ i , : , : ] )
-			for j in range( np.max( lb ) ) :
-				
-				# If cells are not falling into the reference threshold 
-				# areas they are likely errors in the thresholding
-				# and they are removed. If they are bigger, they are kept
-				# and they are assigned an id.
-				if np.max( ref_threshold[ i , : , : ][ lb == ( j + 1 ) ] ) > 0 :
-
-					threshold_image[ i , : , : ][ lb == ( j + 1 ) ] = 0 
-
-				else :
-
-					threshold_image[ i ,  : , : ][ lb == ( j + 1 ) ] = ID
-					ID = ID + 1
-
-	tiff.imsave( threshold_image_name , threshold_image )
-	tiff.imsave( 'raw_channel.tif' , im )
+	tiff.imsave( threshold_image_name , t )
 	
-	return  threshold_image
+	return  t
 
 def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , plot_name = 'hist' , reference_threshold_mask = 'reference_threshold_mask.tif' , target_threshold_mask = 'target_threshold_mask.tif' ):
 
@@ -203,8 +192,12 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 	# list images
 	channels = load_images( path )
 
-	reference_threshold = select_cytoplasm( channels[ 0 ] , median_radius , exclude_spots , threshold_image_name = reference_threshold_mask )
-	target_threshold = select_cytoplasm( channels[ 1 ] , median_radius , exclude_spots , ref_threshold = reference_threshold , threshold_image_name = target_threshold_mask )
+	reference_threshold_tmp = threshold_cytoplasm( channels[ 0 ] , median_radius , exclude_spots )
+	target_threshold_tmp = threshold_cytoplasm( channels[ 1 ] , median_radius , exclude_spots )
+
+	print( 'raw thresholds done' )
+	reference_threshold = select_cytoplasm( reference_threshold_tmp , target_threshold_tmp , threshold_image_name = reference_threshold_mask )
+	target_threshold = select_cytoplasm( target_threshold_tmp , reference_threshold_tmp , threshold_image_name = target_threshold_mask )
 
 	print( 'thresholds done' )
 	if golog : 
