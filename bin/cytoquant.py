@@ -124,7 +124,10 @@ def threshold_cytoplasm( im , median_radius , exclude_spots ) :
 
 	return threshold_image
 
-def select_cytoplasm( t , r , threshold_image_name = 'threshold.tif') : 
+def select_cytoplasm( target , reference , threshold_image_name = 'threshold.tif') : 
+
+	t = cp.deepcopy( target )
+	r = cp.deepcopy( reference ) 
 
 	ID = 1 #ID of thresholded cells cannot start at 0, as that' the background.
 	
@@ -133,38 +136,29 @@ def select_cytoplasm( t , r , threshold_image_name = 'threshold.tif') :
 		t_frame = t[ i , : , : ] 
 		r_frame = r[ i , : , : ] 
 
-		#TO DO add one round of erosion over a copy of t_frame, to remove dust and sspeed up the thresholding
 		lb = label( t_frame )
-		
+
 		for j in range( np.max( lb ) ) :
-			
-			print( j )
 			
 			t_area = len( lb[ lb == j + 1 ] )
 
-			# set the area threshold limit to be exp( 8 ). If cells
+			# set the area threshold limit to be exp( 7 ). If cells
 			# are smaller they are likely errors in the thresholding
 			# and they are removed. If they are bigger, they are kept
 			# and they are assigned an id, but only if the reference (r)
 			# and target (t) images do not overlap.
-			if np.log( t_area ) < 8 :
+			if np.log( t_area ) < 7 :
 
 				t_frame[ lb == ( j + 1 ) ] = 0
 
 			elif np.max( r_frame[ lb == ( j + 1 ) ] ) > 0 :
-					
+				
 				t_frame[ lb == ( j + 1 ) ] = 0 
 
 			else : 
-
+				
 				t_frame[ lb == ( j + 1 ) ] = ID
 				ID = ID + 1
-		
-		# erode the threshold_image. The threshold image selects the pixels 
-		# for the quantification. The erosion is a conservative measure to 
-		# reduce the likelihood of quantifying pixels that are outside the 
-		# cell.
-		t_frame = morphology.erosion( t_frame , selem = morphology.disk( 3 ) )
 
 	tiff.imsave( threshold_image_name , t )
 	
@@ -195,11 +189,30 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 	reference_threshold_tmp = threshold_cytoplasm( channels[ 0 ] , median_radius , exclude_spots )
 	target_threshold_tmp = threshold_cytoplasm( channels[ 1 ] , median_radius , exclude_spots )
 
-	print( 'raw thresholds done' )
+	for i in range( reference_threshold_tmp.shape[ 0 ] ) :	
+	
+		try :
+		
+			# erode the threshold_image. The threshold image selects the pixels 
+			# for the quantification. The erosion is a conservative measure to 
+			# reduce the likelihood of quantifying pixels that are outside the 
+			# cell.
+			reference_threshold_tmp[ i , : , : ] = morphology.erosion( reference_threshold_tmp[ i , : , : ] , selem = morphology.disk( 3 ) )
+			target_threshold_tmp[ i , : , : ] = morphology.erosion( target_threshold_tmp[ i , : , : ] , selem = morphology.disk( 3 ) )
+		
+		except :
+			
+			print( 'reference and threshold masks might differ in size' )
+			raise
+
+	#TO DO add one round of erosion over a copy of t_frame, to remove dust and sspeed up the thresholding
+	tiff.imsave( 'reference_threshold_tmp.tif' , reference_threshold_tmp )
+	tiff.imsave( 'target_threshold_tmp.tif' , target_threshold_tmp )
+	
 	reference_threshold = select_cytoplasm( reference_threshold_tmp , target_threshold_tmp , threshold_image_name = reference_threshold_mask )
 	target_threshold = select_cytoplasm( target_threshold_tmp , reference_threshold_tmp , threshold_image_name = target_threshold_mask )
-
-	print( 'thresholds done' )
+	
+	print( '--------thresholds done--------' )
 	if golog : 
 
 		print( "golog = True; I'm working in the log space of the flurescence intensities" )
@@ -211,7 +224,7 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 			# that are left alone and are labelled as one thresholded object. These are not cells and need to be
 			# discarded. I use the same criteria as to identify vacuels. Any object larger thant exp( 8 ) pixels
 			# is considered a cell and it is eligible of analysis
-			if np.log( len( reference_threshold[ reference_threshold == i ] ) ) > 8 :
+			if np.log( len( reference_threshold[ reference_threshold == i ] ) ) > 0 :
 				reference_values.append( np.median( np.log( channels[ 1 ][ reference_threshold == i ] ) / np.log( 2 ) ) )
 		reference_all_values = np.log( channels[ 1 ][ reference_threshold > 0 ] ) / np.log( 2 ) 
 
