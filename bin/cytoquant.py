@@ -167,6 +167,7 @@ def select_cytoplasm( target , reference , threshold_image_name = 'threshold.tif
 def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , plot_name = 'hist' , reference_threshold_mask = 'reference_threshold_mask.tif' , target_threshold_mask = 'target_threshold_mask.tif' ):
 
 	"""
+
 	cytoquant( path , median_radius = 17 , exclude_spots = True , golog = True ) : extract the pixel values
 	measuring the cytoplasmatic intensity of the protein of interest and of the cells carrying an RFP tag, 
 	which are used to measure the autofluorescence intensity of the cell.
@@ -181,6 +182,7 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 	- exclude_spots: remove bright patches (for example, endocytic events) from the quantification of the
 	cytoplasmatic concentration. Default is True
 	- golog: work in the log space of the fluorescence intensities. Default is True
+	
 	"""
 
 	# list images
@@ -212,28 +214,37 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 	target_threshold = select_cytoplasm( target_threshold_tmp , reference_threshold_tmp , threshold_image_name = target_threshold_mask )
 	
 	print( '--------thresholds done--------' )
+
+	reference_values = []
+	target_values = []
+
+	# collect the median cytoplasmatic intensity in each mask
+	for i in range( 1 , np.max( reference_threshold ) + 1 ) :
+
+		reference_values.append( np.median( channels[ 1 ][ reference_threshold == i ] ) )
+
+	reference_all_values = channels[ 1 ][ reference_threshold > 0 ]
+
+	for i in range( 1 , np.max( target_threshold ) + 1 ) :
+
+		target_values.append( np.median( channels[ 1 ][ target_threshold == i ] ) )
+
+	target_all_values = channels[ 1 ][ target_threshold > 0 ]
+
+	# compute the fluorescence intensity in the target cells relative to the reference cells
 	if golog : 
 
 		print( "golog = True; I'm working in the log space of the flurescence intensities" )
 
-		reference_values = []
-		for i in range( 1 , np.max( reference_threshold ) + 1 ) :
+		reference_data = np.log( reference_values ) / np.log( 2 )
+		target_data = np.log( target_values ) / np.log( 2 )
 
-			reference_values.append( np.median( np.log( channels[ 1 ][ reference_threshold == i ] ) / np.log( 2 ) ) )
-		
-		reference_all_values = np.log( channels[ 1 ][ reference_threshold > 0 ] ) / np.log( 2 ) 
+	r = np.median( reference_data )
+	s_r = MAD( reference_data ) / np.sqrt( len( reference_data ) )
+	t = np.median( target_data ) 
+	s_t = MAD( target_data ) / np.sqrt( len( target_data ) )
 
-		target_values = []
-		for i in range( 1 , np.max( target_threshold ) + 1 ) :
-
-			target_values.append( np.median( np.log( channels[ 1 ][ target_threshold == i ] ) / np.log( 2 ) ) )
-		
-		target_all_values = np.log( channels[ 1 ][ target_threshold > 0 ] ) / np.log( 2 ) 
-
-		r = np.median( reference_values )
-		s_r = MAD( reference_values ) / np.sqrt( len( reference_values ) )
-		t = np.median( target_values ) 
-		s_t = MAD( target_values ) / np.sqrt( len( target_values ) )
+	if golog : 
 
 		output = [
 				2 ** t - 2 ** r ,
@@ -241,28 +252,6 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 				]
 	else :
 
-		reference_values = []
-		
-		for i in range( 1 , np.max( reference_threshold ) + 1 ) :
-			
-			reference_values.append( np.median( channels[ 1 ][ reference_threshold == i ] ) )
-		
-		reference_all_values = channels[ 1 ][ refrence_threshold > 0 ]
-		
-		target_values = []
-		
-		for i in range( 1 , np.max( target_threshold ) + 1 ) :
-			
-				target_values.append( np.median( channels[ 1 ][ target_threshold == i ] ) )
-
-		target_all_values = channels[ 1 ][ target_threshold > 0 ]
-	
-
-		t = np.median( target_values ) 
-		s_t = MAD( target_values ) / np.sqrt( len( target_values ) )
-		r = np.median( reference_values )
-		s_r = MAD( reference_values ) / np.sqrt( len( reference_values ) )
-		
 		output = [
 				t - r  ,
 				np.sqrt( s_t ** 2 + s_r ** 2 ) 
