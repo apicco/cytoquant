@@ -52,7 +52,7 @@ def load_images( path , reference_frame = 0 , target_frame = 1 , fv_shape = ( 10
 
 			# images can be a crop of the filed of view. If so, they need to be 
 			# sized to be added to the stack, which has the size of the field of 
-			# view. The extra pixels that are added to fill the empty space have
+			# view. The exr pixels that are added to fill the empty space have
 			# the value of the lowest pixel intensity recorded in the image, so 
 			# to interfere the least with the tresholding of the cells, which are
 			# much brighter.
@@ -248,7 +248,7 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 
 		output = [
 				2 ** t - 2 ** r ,
-				np.sqrt( ( s_t * np.log( 2 ) *  2 ** t ) ** 2 + ( s_r * np.log( 2 ) * 2 ** r ) ** 2 ) 
+				np.sqrt( ( s_t * np.log( 2 ) * 2 ** t ) ** 2 + ( s_r * np.log( 2 ) * 2 ** r ) ** 2 ) 
 				]
 	else :
 
@@ -258,11 +258,10 @@ def cytoquant( path , median_radius = 6 , exclude_spots = True , golog = True , 
 				]
 
 	plt.figure()
+	plt.xlim( 200 , 2000 ) 
 	plt.hist( reference_all_values , normed = True , facecolor = 'g', alpha = 0.75 , label = 'cell autoFI' )
-	#plt.hist( reference_values , normed = True , facecolor = 'b', alpha = 0.75 , label = 'cell autoFI' )
 	plt.hist( target_all_values , normed = True , facecolor = 'r' , alpha = 0.75 , label = 'target prot. FI' )
-	#plt.hist( target_values , normed = True , facecolor = 'k' , alpha = 0.75 , label = 'target prot. FI' )
-	plt.xlabel( 'log( FI )/log( 2 )' )
+	plt.xlabel( 'FI ' )
 	plt.title( 'ratio = ' + str( output[ 0 ] ) )
 	plt.legend( loc = 'best' )
 	plt.savefig( plot_name + '.png' )
